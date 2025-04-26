@@ -6,45 +6,66 @@ import dotenv from "dotenv";
 import productRoutes from "./routes/productRoutes.js";
 import { sql } from "./config/db.js";
 import { aj } from "./lib/arcjet.js";
-
+import path from "path";
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
+const __dirname = path.resolve(); // Get the current directory
 
 app.use(express.json());
 app.use(cors());
-app.use(helmet()); //add security in the middleware
+app.use(helmet({ contentSecurityPolicy: false })); //add security in the middleware
 app.use(morgan("dev")); //log the request
 
-app.use(async (req,res,next)=>{
-    try {
-        const decision = await aj.protect(req,{
-            requested:1, //Each request consumes one token
-        })
-        if(decision.isDenied()){
-            if(decision.reason.isRateLimit()){
-                return res.status(429).json({success:false,message:"Rate limit exceeded"})
-            }else if(decision.reason.isBot()){
-                return res.status(403).json({success:false,message:"Bot detected"})
-            }else{res.status(403).json({success:false,message: "Forbidden"})}
-            return
-        }
-        //check for spoofed bots
-        if(decision.results.some((result)=>(result.reason.isBot() && result.reason.isSpoofed()))){
-            return res.status(403).json({success:false,message:"Spoofed bot detected"})
-        }
-        console.log("Everything is fine")
-        next()
-    } catch (error) {
-        console.log("Arcjet Error")
-        next(error)
+app.use(async (req, res, next) => {
+  try {
+    const decision = await aj.protect(req, {
+      requested: 1, //Each request consumes one token
+    });
+    if (decision.isDenied()) {
+      if (decision.reason.isRateLimit()) {
+        return res
+          .status(429)
+          .json({ success: false, message: "Rate limit exceeded" });
+      } else if (decision.reason.isBot()) {
+        return res
+          .status(403)
+          .json({ success: false, message: "Bot detected" });
+      } else {
+        res.status(403).json({ success: false, message: "Forbidden" });
+      }
+      return;
     }
-})
+    //check for spoofed bots
+    if (
+      decision.results.some(
+        (result) => result.reason.isBot() && result.reason.isSpoofed()
+      )
+    ) {
+      return res
+        .status(403)
+        .json({ success: false, message: "Spoofed bot detected" });
+    }
+    console.log("Everything is fine");
+    next();
+  } catch (error) {
+    console.log("Arcjet Error");
+    next(error);
+  }
+});
 
 app.use("/api/products", productRoutes);
+
+if (process.env.NODE_ENV === "production") {
+  // server our react app
+  app.use(express.static(path.join(__dirname, "/frontend/dist")));
+
+  app.get("*", (req, res) => {
+    res.sendFile(path.resolve(__dirname, "frontend", "dist", "index.html"));
+  });
+}
 
 const initDB = async () => {
   try {
@@ -58,7 +79,7 @@ const initDB = async () => {
             updated_at TIMESTAMP DEFAULT current_timestamp
             )
         `;
-        console.log("Database initialized successfully");
+    console.log("Database initialized successfully");
   } catch (error) {
     console.error("Error initializing database:", error);
   }
